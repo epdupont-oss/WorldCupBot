@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -10,6 +11,8 @@ from worldcupbot.core import WorldCupBot
 from worldcupbot.formatting import format_update_message
 from worldcupbot.state import STATE
 
+logger = logging.getLogger(__name__)
+
 
 def register_handlers(application, bot_core: WorldCupBot) -> None:
     async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -18,6 +21,7 @@ def register_handlers(application, bot_core: WorldCupBot) -> None:
         try:
             matches = await bot_core.api.get_matches_for_date(today_local)
         except Exception:
+            logger.exception("Failed to fetch matches for /update")
             await update.message.reply_text("Couldn't fetch today's matches right now.")
             return
         await update.message.reply_text(format_update_message(matches, tz))
