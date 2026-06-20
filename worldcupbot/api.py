@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Optional
 
@@ -7,6 +8,8 @@ import httpx
 
 from worldcupbot.config import WC_API_BASE_URL, WC_API_KEY, WC_LEAGUE_ID, WC_SEASON
 from worldcupbot.models import Match
+
+logger = logging.getLogger(__name__)
 
 
 class WorldCupAPIClient:
@@ -25,6 +28,14 @@ class WorldCupAPIClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    @staticmethod
+    def _log_api_errors(payload: dict) -> None:
+        # API-Football returns HTTP 200 even when the request was rejected (e.g.
+        # plan restrictions, bad params); the rejection reason is in "errors".
+        errors = payload.get("errors")
+        if errors:
+            logger.warning("API-Football returned errors: %s", errors)
+
     async def get_matches_for_date(self, day: date) -> list[Match]:
         resp = await self._client.get(
             "/fixtures",
@@ -36,19 +47,25 @@ class WorldCupAPIClient:
             },
         )
         resp.raise_for_status()
-        fixtures = resp.json().get("response", [])
+        payload = resp.json()
+        self._log_api_errors(payload)
+        fixtures = payload.get("response", [])
         return [Match.from_api(item) for item in fixtures]
 
     async def get_match(self, fixture_id: int) -> Match:
         fixture_resp = await self._client.get("/fixtures", params={"id": fixture_id})
         fixture_resp.raise_for_status()
-        fixtures = fixture_resp.json().get("response", [])
+        fixture_payload = fixture_resp.json()
+        self._log_api_errors(fixture_payload)
+        fixtures = fixture_payload.get("response", [])
         if not fixtures:
             raise ValueError(f"Fixture {fixture_id} not found")
 
         events_resp = await self._client.get("/fixtures/events", params={"fixture": fixture_id})
         events_resp.raise_for_status()
-        events = events_resp.json().get("response", [])
+        events_payload = events_resp.json()
+        self._log_api_errors(events_payload)
+        events = events_payload.get("response", [])
 
         return Match.from_api(fixtures[0], events)
 
@@ -57,7 +74,9 @@ class WorldCupAPIClient:
             return self._team_id_cache[team_name]
         resp = await self._client.get("/teams", params={"name": team_name, "season": WC_SEASON})
         resp.raise_for_status()
-        results = resp.json().get("response", [])
+        payload = resp.json()
+        self._log_api_errors(payload)
+        results = payload.get("response", [])
         if not results:
             return None
         team_id = results[0]["team"]["id"]
@@ -78,7 +97,9 @@ class WorldCupAPIClient:
             },
         )
         resp.raise_for_status()
-        fixtures = resp.json().get("response", [])
+        payload = resp.json()
+        self._log_api_errors(payload)
+        fixtures = payload.get("response", [])
         if not fixtures:
             return None
         return Match.from_api(fixtures[0])
