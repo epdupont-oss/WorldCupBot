@@ -29,7 +29,8 @@ def build_application() -> Application:
         await bot_core.refresh_schedule()
 
     async def on_shutdown(app: Application) -> None:
-        scheduler.shutdown(wait=False)
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
         await api.aclose()
 
     application.post_init = on_startup
