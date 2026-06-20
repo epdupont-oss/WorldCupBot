@@ -27,7 +27,8 @@ from worldcupbot.formatting import (
     format_pre_match,
     next_fixture_label,
 )
-from worldcupbot.models import Match
+from worldcupbot.mistral import MistralEnricher
+from worldcupbot.models import Match, Team
 from worldcupbot.state import STATE
 
 logger = logging.getLogger(__name__)
@@ -50,10 +51,17 @@ def _first_watched_team_name(match: Match) -> str | None:
 
 
 class WorldCupBot:
-    def __init__(self, bot: Bot, api: WorldCupAPIClient, scheduler: AsyncIOScheduler) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        api: WorldCupAPIClient,
+        scheduler: AsyncIOScheduler,
+        mistral: MistralEnricher | None = None,
+    ) -> None:
         self.bot = bot
         self.api = api
         self.scheduler = scheduler
+        self.mistral = mistral or MistralEnricher()
 
     async def send(self, text: str) -> None:
         await self.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
@@ -224,13 +232,13 @@ class WorldCupBot:
             and STATE.live_home_score is not None
             and match.home_score > STATE.live_home_score
         ):
-            await self.send(format_goal(match, match.home))
+            await self._send_goal_alert(match, match.home)
         if (
             match.away_score is not None
             and STATE.live_away_score is not None
             and match.away_score > STATE.live_away_score
         ):
-            await self.send(format_goal(match, match.away))
+            await self._send_goal_alert(match, match.away)
         STATE.live_home_score = match.home_score
         STATE.live_away_score = match.away_score
 
@@ -243,6 +251,14 @@ class WorldCupBot:
 
         if match.is_finished:
             await self._finish_live_match(match)
+
+    async def _send_goal_alert(self, match: Match, scoring_team: Team) -> None:
+        scorer_info = None
+        try:
+            scorer_info = await self.mistral.lookup_goal_scorer(scoring_team.name, match.score_label)
+        except Exception:
+            logger.exception("Scorer enrichment lookup raised unexpectedly")
+        await self.send(format_goal(match, scoring_team, scorer_info))
 
     async def _finish_live_match(self, match: Match) -> None:
         job = self.scheduler.get_job(JOB_LIVE_POLL)

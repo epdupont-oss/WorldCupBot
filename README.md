@@ -18,6 +18,8 @@ All configuration is via environment variables:
 | `WC_COMPETITION_CODE` | no | `WC` | football-data.org competition code for the World Cup |
 | `WC_SEASON` | no | `2026` | Season year passed to football-data.org |
 | `WATCHED_TEAMS` | no | `Switzerland,USA` | Comma-separated team names (as returned by API-Football) to track closely |
+| `MISTRAL_API_KEY` | no | — | Enables web-search-grounded scorer lookup on goal alerts via Mistral's Agents API. Leave unset to keep goal alerts generic |
+| `MISTRAL_MODEL` | no | `mistral-small-latest` | Model used for the scorer lookup |
 
 Copy `.env.example` to `.env` and fill in values for local development.
 
@@ -92,3 +94,18 @@ If a paid plan (API-Football Pro, or football-data.org's deep data pack) is adde
 later to restore scorer/card-level detail, `worldcupbot/api.py` and
 `worldcupbot/models.py` are the only places that need to change — the rest of the
 bot operates on the `Match`/`Team` dataclasses.
+
+## Optional: Mistral-powered scorer lookup
+
+Since football-data.org's free tier doesn't expose who scored, setting
+`MISTRAL_API_KEY` enables an extra step on each detected goal: the bot asks
+Mistral's Agents API (with its built-in `web_search` connector) to search the
+web for the scorer's name and appends it to the goal alert if found. If the
+key is unset, lookups fail, or no confident answer is found, the alert falls
+back to the generic score-only message — this is best-effort enrichment, not
+a dependency. See `worldcupbot/mistral.py`.
+
+Note: Mistral bills `web_search` tool calls separately from token usage
+(at the time of writing, $30 per 1,000 calls). Since lookups only fire on
+detected goals (not on every 5-minute poll), expected volume per match is
+low (a handful of calls), but this is a real per-event cost to be aware of.

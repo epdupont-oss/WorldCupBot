@@ -34,8 +34,11 @@ def format_pre_match(match: Match, tz: ZoneInfo) -> str:
     )
 
 
-def format_goal(match: Match, scoring_team: Team) -> str:
-    return f"⚽ GOAL — {match.home.name} {match.score_label} {match.away.name}\n{scoring_team.label} scores!"
+def format_goal(match: Match, scoring_team: Team, scorer_info: Optional[str] = None) -> str:
+    line = f"⚽ GOAL — {match.home.name} {match.score_label} {match.away.name}\n{scoring_team.label} scores!"
+    if scorer_info:
+        line += f"\n🔍 {scorer_info}"
+    return line
 
 
 def format_phase_transition(match: Match, label: str) -> str:
