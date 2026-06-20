@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from worldcupbot.models import Match, MatchEvent
+from worldcupbot.models import Match, Team
 
 
 def local_time(match: Match, tz: ZoneInfo) -> str:
@@ -34,47 +34,23 @@ def format_pre_match(match: Match, tz: ZoneInfo) -> str:
     )
 
 
-def format_goal(match: Match, event: MatchEvent) -> str:
-    line = f"⚽ GOAL — {match.home.name} {match.score_label} {match.away.name}\n👤 {event.player} {event.minute}'"
-    if event.assist:
-        line += f" ({event.assist} assist)"
-    return line
+def format_goal(match: Match, scoring_team: Team) -> str:
+    return f"⚽ GOAL — {match.home.name} {match.score_label} {match.away.name}\n{scoring_team.label} scores!"
 
 
-def format_red_card(match: Match, event: MatchEvent) -> str:
-    return f"🟥 Red card — {event.player} {event.minute}'\n{match.home.name} {match.score_label} {match.away.name}"
-
-
-def format_phase_transition(match: Match, event: MatchEvent) -> str:
-    labels = {
-        "half_time": "🔔 Half-time",
-        "second_half_start": "▶️ Second half underway",
-        "extra_time_start": "⏳ Extra time",
-        "penalties_start": "🥅 Penalties",
-    }
-    header = labels.get(event.type, event.type)
-    scorers = match.scorers_label()
-    body = f"{header}: {match.home.name} {match.score_label} {match.away.name}"
-    if scorers:
-        body += f"\n⚽ {scorers}"
-    return body
+def format_phase_transition(match: Match, label: str) -> str:
+    return f"{label}: {match.home.name} {match.score_label} {match.away.name}"
 
 
 def format_full_time(match: Match, next_fixture_lines: list[str]) -> str:
-    home_scorers = match.scorers_label(match.home.id)
-    away_scorers = match.scorers_label(match.away.id)
     lines = [f"✅ Full-time: {match.home.name} {match.score_label} {match.away.name}"]
-    if home_scorers:
-        lines.append(f"⚽ {home_scorers}")
-    if away_scorers:
-        lines.append(f"⚽ {away_scorers} ({match.away.name})")
     lines.extend(next_fixture_lines)
     return "\n".join(lines)
 
 
 def format_update_line(match: Match, tz: ZoneInfo) -> str:
     if match.is_live:
-        status = f"🔴 live {match.minute}'" if match.minute else "🔴 live"
+        status = "🔴 live"
     elif match.is_finished:
         status = "✅ finished"
     else:
@@ -85,10 +61,6 @@ def format_update_line(match: Match, tz: ZoneInfo) -> str:
         line += f" · {match.score_label}"
     else:
         line += f" · {local_time(match, tz)}"
-
-    scorers = match.scorers_label()
-    if scorers and (match.is_live or match.is_finished):
-        line += f"\n   ⚽ {scorers}"
     return line
 
 
@@ -131,11 +103,7 @@ def format_evening_recap(
 ) -> str:
     lines = ["🌙 Today's results:"]
     for m in matches:
-        scorers = m.scorers_label()
-        line = f"{m.home.label} {m.score_label} {m.away.label}"
-        if scorers:
-            line += f" · {scorers}"
-        lines.append(line)
+        lines.append(f"{m.home.label} {m.score_label} {m.away.label}")
     if watched_team_name:
         lines.append(next_fixture_label(watched_team_name, next_fixture, tz))
     return "\n".join(lines)

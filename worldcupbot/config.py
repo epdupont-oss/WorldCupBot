@@ -11,12 +11,10 @@ TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID")
 WC_API_KEY = _env("WC_API_KEY")
 DEFAULT_DISPLAY_TZ = _env("DISPLAY_TZ", "Europe/Zurich")
 
-# API-Football (api-sports.io). Direct subscription uses this base URL and the
-# x-apisports-key header; if going through RapidAPI instead, set
-# WC_API_BASE_URL=https://api-football-v1.p.rapidapi.com/v3 and adjust api.py's
-# auth header to x-rapidapi-key / x-rapidapi-host.
-WC_API_BASE_URL = _env("WC_API_BASE_URL", "https://v3.football.api-sports.io")
-WC_LEAGUE_ID = int(_env("WC_LEAGUE_ID", "1"))  # World Cup
+# football-data.org. Free tier includes the World Cup competition (code "WC")
+# with match scores/standings, but not goal-scorer or card-level event data.
+WC_API_BASE_URL = _env("WC_API_BASE_URL", "https://api.football-data.org/v4")
+WC_COMPETITION_CODE = _env("WC_COMPETITION_CODE", "WC")
 WC_SEASON = int(_env("WC_SEASON", "2026"))
 
 WATCHED_TEAM_NAMES = {

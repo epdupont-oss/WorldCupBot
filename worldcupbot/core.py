@@ -25,10 +25,9 @@ from worldcupbot.formatting import (
     format_morning_digest,
     format_phase_transition,
     format_pre_match,
-    format_red_card,
     next_fixture_label,
 )
-from worldcupbot.models import Match, MatchEvent
+from worldcupbot.models import Match
 from worldcupbot.state import STATE
 
 logger = logging.getLogger(__name__)
@@ -94,13 +93,16 @@ class WorldCupBot:
 
         if live_watched is not None:
             STATE.live_match_id = live_watched.id
-            STATE.live_match_status = live_watched.status_short
-            STATE.seen_event_ids = {e.id for e in live_watched.events}
+            STATE.live_match_status = live_watched.status
+            STATE.live_home_score = live_watched.home_score
+            STATE.live_away_score = live_watched.away_score
             self._start_live_poll()
             return
 
         STATE.live_match_id = None
         STATE.live_match_status = None
+        STATE.live_home_score = None
+        STATE.live_away_score = None
 
         upcoming_watched = next(
             (m for m in sorted(watched_matches, key=lambda m: m.kickoff_utc) if m.is_scheduled),
@@ -217,19 +219,27 @@ class WorldCupBot:
             logger.exception("Failed to poll live match")
             return
 
-        new_events = [e for e in match.events if e.id not in STATE.seen_event_ids]
-        for event in sorted(new_events, key=lambda e: e.minute_sort_key):
-            STATE.seen_event_ids.add(event.id)
-            if event.is_goal:
-                await self.send(format_goal(match, event))
-            elif event.is_red_card:
-                await self.send(format_red_card(match, event))
+        if (
+            match.home_score is not None
+            and STATE.live_home_score is not None
+            and match.home_score > STATE.live_home_score
+        ):
+            await self.send(format_goal(match, match.home))
+        if (
+            match.away_score is not None
+            and STATE.live_away_score is not None
+            and match.away_score > STATE.live_away_score
+        ):
+            await self.send(format_goal(match, match.away))
+        STATE.live_home_score = match.home_score
+        STATE.live_away_score = match.away_score
 
-        if match.status_short != STATE.live_match_status:
-            transition = MatchEvent.phase_transition(match.status_short)
-            if transition is not None:
-                await self.send(format_phase_transition(match, transition))
-            STATE.live_match_status = match.status_short
+        if match.status != STATE.live_match_status:
+            if match.status == "PAUSED":
+                await self.send(format_phase_transition(match, "🔔 Half-time"))
+            elif STATE.live_match_status == "PAUSED" and match.status == "IN_PLAY":
+                await self.send(format_phase_transition(match, "▶️ Play resumed"))
+            STATE.live_match_status = match.status
 
         if match.is_finished:
             await self._finish_live_match(match)
@@ -240,6 +250,8 @@ class WorldCupBot:
             job.remove()
         STATE.live_match_id = None
         STATE.live_match_status = None
+        STATE.live_home_score = None
+        STATE.live_away_score = None
 
         team_name = _first_watched_team_name(match) or next(iter(WATCHED_TEAM_NAMES))
         next_fixture = None

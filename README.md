@@ -12,11 +12,11 @@ All configuration is via environment variables:
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | — | Bot token from `@BotFather` |
 | `TELEGRAM_CHAT_ID` | yes | — | Chat/channel id to post updates to |
-| `WC_API_KEY` | yes | — | API key for API-Football (api-sports.io) |
+| `WC_API_KEY` | yes | — | API token for football-data.org |
 | `DISPLAY_TZ` | no | `Europe/Zurich` | IANA timezone all displayed times and schedules are anchored to |
-| `WC_API_BASE_URL` | no | `https://v3.football.api-sports.io` | Override for the API base URL |
-| `WC_LEAGUE_ID` | no | `1` | API-Football league id for the World Cup |
-| `WC_SEASON` | no | `2026` | Season year passed to API-Football |
+| `WC_API_BASE_URL` | no | `https://api.football-data.org/v4` | Override for the API base URL |
+| `WC_COMPETITION_CODE` | no | `WC` | football-data.org competition code for the World Cup |
+| `WC_SEASON` | no | `2026` | Season year passed to football-data.org |
 | `WATCHED_TEAMS` | no | `Switzerland,USA` | Comma-separated team names (as returned by API-Football) to track closely |
 
 Copy `.env.example` to `.env` and fill in values for local development.
@@ -41,9 +41,9 @@ The bot determines its mode once per day (00:05 in the active display timezone)
 and whenever `/timezone` changes the active timezone:
 
 - **LIVE** — a Switzerland or USA match is currently in progress. Polls the match
-  endpoint every 5 minutes, diffs the event timeline against already-seen events,
-  and posts goals, red cards, and phase transitions. Posts a full-time recap and
-  exits live mode when the match finishes.
+  endpoint every 5 minutes, diffs the score against the last-seen score to post
+  goal alerts, and posts a half-time/play-resumed message on status changes.
+  Posts a full-time recap and exits live mode when the match finishes.
 - **WATCHFUL** — a Switzerland or USA match is scheduled later today. Schedules a
   single pre-match alert 2 minutes before kickoff. No polling.
 - **IDLE** — no Switzerland or USA match today. Sends a morning digest at 08:00
@@ -59,31 +59,36 @@ and whenever `/timezone` changes the active timezone:
   already fired today are not replayed.
 - `/timezone` — show the current timezone and local time.
 
-## API-Football integration notes
+## football-data.org integration notes
 
-The original data source (wc2026api.com) is no longer available. The bot now uses
-[API-Football](https://www.api-football.com/) (api-sports.io), scoped to the World
-Cup league/season:
+The original data source (wc2026api.com) is no longer available. A second
+integration attempt used API-Football, but its free tier doesn't include the 2026
+season (only 2022–2024) — see git history if reviving that integration is ever
+useful. The bot now uses [football-data.org](https://www.football-data.org/) v4,
+whose free tier permanently includes the World Cup competition (code `WC`):
 
-- `GET /fixtures?date=YYYY-MM-DD&league=1&season=2026` — matches for a given date
-- `GET /fixtures?id={id}` + `GET /fixtures/events?fixture={id}` — a single match's
-  current score/status plus its full goal/card timeline
-- `GET /teams?name={name}&season=2026` — resolve a team name to its numeric id
+- `GET /competitions/WC/matches?dateFrom=...&dateTo=...&season=2026` — matches for
+  a given date
+- `GET /matches/{id}` — a single match's current status/score
+- `GET /competitions/WC/teams?season=2026` — resolve a team name to its numeric id
   (cached in-memory per process)
-- `GET /fixtures?team={id}&next=1&league=1&season=2026` — a team's next fixture
-- Auth via the `x-apisports-key` header
+- `GET /teams/{id}/matches?status=SCHEDULED&competitions=WC&limit=1` — a team's
+  next fixture
+- Auth via the `X-Auth-Token` header
 
-API-Football doesn't expose explicit "half-time"/"full-time" events — match phase
-is read from `fixture.status.short` (`1H`, `HT`, `2H`, `ET`, `P`, `FT`, ...) and
-transitions are detected by diffing against the last-seen status in `core.py`.
-Goal/card events also lack a stable id, so `MatchEvent` builds a synthetic one from
-the event's minute, team, player, and detail to dedupe across polls.
+**Free-tier limitation**: football-data.org's free tier does not expose
+goal-scorer or card-level event data (that requires their paid "deep data pack").
+As a result, LIVE mode is simplified compared to the original spec:
 
-Sign up for a key at api-football.com (or via RapidAPI) — the free tier is rate
-limited (historically 100 requests/day), which is enough for this bot's polling
-pattern (5-minute polling only while a watched team is actually live) but leaves
-little headroom for heavy manual `/update` use; upgrade if needed.
+- Goal alerts are generic ("⚽ GOAL — Switzerland 1–0 USA / 🇨🇭 Switzerland
+  scores!"), detected by diffing `home_score`/`away_score` between polls — no
+  scorer name or assist.
+- Red card alerts are not available and have been removed.
+- Half-time/play-resumed messages are inferred from the coarse `status` field
+  (`SCHEDULED`, `TIMED`, `IN_PLAY`, `PAUSED`, `FINISHED`, ...) rather than a
+  detailed phase code; extra time/penalties aren't distinguished from regular play.
 
-If the live API differs from what's coded here, `worldcupbot/api.py` and
+If a paid plan (API-Football Pro, or football-data.org's deep data pack) is added
+later to restore scorer/card-level detail, `worldcupbot/api.py` and
 `worldcupbot/models.py` are the only places that need to change — the rest of the
-bot operates on the `Match`/`MatchEvent` dataclasses.
+bot operates on the `Match`/`Team` dataclasses.

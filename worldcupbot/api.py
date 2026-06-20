@@ -6,21 +6,21 @@ from typing import Optional
 
 import httpx
 
-from worldcupbot.config import WC_API_BASE_URL, WC_API_KEY, WC_LEAGUE_ID, WC_SEASON
+from worldcupbot.config import WC_API_BASE_URL, WC_API_KEY, WC_COMPETITION_CODE, WC_SEASON
 from worldcupbot.models import Match
 
 logger = logging.getLogger(__name__)
 
 
 class WorldCupAPIClient:
-    """Async wrapper around the API-Football (api-sports.io) REST API, scoped to
-    the World Cup league/season. https://www.api-football.com/documentation-v3
+    """Async wrapper around the football-data.org v4 REST API, scoped to the
+    World Cup competition. https://docs.football-data.org/general/v4/
     """
 
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(
             base_url=WC_API_BASE_URL,
-            headers={"x-apisports-key": WC_API_KEY},
+            headers={"X-Auth-Token": WC_API_KEY},
             timeout=15.0,
         )
         self._team_id_cache: dict[str, int] = {}
@@ -30,56 +30,49 @@ class WorldCupAPIClient:
 
     @staticmethod
     def _log_api_errors(payload: dict) -> None:
-        # API-Football returns HTTP 200 even when the request was rejected (e.g.
-        # plan restrictions, bad params); the rejection reason is in "errors".
-        errors = payload.get("errors")
-        if errors:
-            logger.warning("API-Football returned errors: %s", errors)
+        message = payload.get("message")
+        if message:
+            logger.warning("football-data.org returned an error: %s", message)
 
     async def get_matches_for_date(self, day: date) -> list[Match]:
         resp = await self._client.get(
-            "/fixtures",
-            params={
-                "date": day.isoformat(),
-                "league": WC_LEAGUE_ID,
-                "season": WC_SEASON,
-                "timezone": "UTC",
-            },
+            f"/competitions/{WC_COMPETITION_CODE}/matches",
+            params={"dateFrom": day.isoformat(), "dateTo": day.isoformat(), "season": WC_SEASON},
         )
         resp.raise_for_status()
         payload = resp.json()
         self._log_api_errors(payload)
-        fixtures = payload.get("response", [])
-        return [Match.from_api(item) for item in fixtures]
+        matches = payload.get("matches", [])
+        return [Match.from_api(item) for item in matches]
 
     async def get_match(self, fixture_id: int) -> Match:
-        fixture_resp = await self._client.get("/fixtures", params={"id": fixture_id})
-        fixture_resp.raise_for_status()
-        fixture_payload = fixture_resp.json()
-        self._log_api_errors(fixture_payload)
-        fixtures = fixture_payload.get("response", [])
-        if not fixtures:
-            raise ValueError(f"Fixture {fixture_id} not found")
-
-        events_resp = await self._client.get("/fixtures/events", params={"fixture": fixture_id})
-        events_resp.raise_for_status()
-        events_payload = events_resp.json()
-        self._log_api_errors(events_payload)
-        events = events_payload.get("response", [])
-
-        return Match.from_api(fixtures[0], events)
+        resp = await self._client.get(f"/matches/{fixture_id}")
+        resp.raise_for_status()
+        payload = resp.json()
+        self._log_api_errors(payload)
+        return Match.from_api(payload)
 
     async def get_team_id(self, team_name: str) -> Optional[int]:
         if team_name in self._team_id_cache:
             return self._team_id_cache[team_name]
-        resp = await self._client.get("/teams", params={"name": team_name, "season": WC_SEASON})
+        resp = await self._client.get(
+            f"/competitions/{WC_COMPETITION_CODE}/teams", params={"season": WC_SEASON}
+        )
         resp.raise_for_status()
         payload = resp.json()
         self._log_api_errors(payload)
-        results = payload.get("response", [])
-        if not results:
+        teams = payload.get("teams", [])
+        match = next(
+            (
+                t
+                for t in teams
+                if team_name in (t.get("name"), t.get("shortName"), t.get("tla"))
+            ),
+            None,
+        )
+        if match is None:
             return None
-        team_id = results[0]["team"]["id"]
+        team_id = match["id"]
         self._team_id_cache[team_name] = team_id
         return team_id
 
@@ -88,18 +81,13 @@ class WorldCupAPIClient:
         if team_id is None:
             return None
         resp = await self._client.get(
-            "/fixtures",
-            params={
-                "team": team_id,
-                "next": 1,
-                "league": WC_LEAGUE_ID,
-                "season": WC_SEASON,
-            },
+            f"/teams/{team_id}/matches",
+            params={"status": "SCHEDULED", "competitions": WC_COMPETITION_CODE, "limit": 1},
         )
         resp.raise_for_status()
         payload = resp.json()
         self._log_api_errors(payload)
-        fixtures = payload.get("response", [])
-        if not fixtures:
+        matches = payload.get("matches", [])
+        if not matches:
             return None
-        return Match.from_api(fixtures[0])
+        return Match.from_api(matches[0])
