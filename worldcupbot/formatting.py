@@ -23,7 +23,7 @@ def next_fixture_label(team_name: str, fixture: Optional[Match], tz: ZoneInfo) -
         return f"📅 Next {team_name}: TBD"
     opponent = fixture.away if fixture.home.name == team_name else fixture.home
     team = fixture.home if fixture.home.name == team_name else fixture.away
-    return f"📅 Next: {team.name} vs {opponent.name} · {local_date_label(fixture, tz)} · {local_time(fixture, tz)}"
+    return f"📅 Next: {team.label} vs {opponent.label} · {local_date_label(fixture, tz)} · {local_time(fixture, tz)}"
 
 
 def format_pre_match(match: Match, tz: ZoneInfo) -> str:
@@ -35,18 +35,18 @@ def format_pre_match(match: Match, tz: ZoneInfo) -> str:
 
 
 def format_goal(match: Match, scoring_team: Team, scorer_info: Optional[str] = None) -> str:
-    line = f"⚽ GOAL — {match.home.name} {match.score_label} {match.away.name}\n{scoring_team.label} scores!"
+    line = f"⚽ GOAL — {match.home.label} {match.score_label} {match.away.label}\n{scoring_team.label} scores!"
     if scorer_info:
         line += f"\n🔍 {scorer_info}"
     return line
 
 
 def format_phase_transition(match: Match, label: str) -> str:
-    return f"{label}: {match.home.name} {match.score_label} {match.away.name}"
+    return f"{label}: {match.home.label} {match.score_label} {match.away.label}"
 
 
 def format_full_time(match: Match, next_fixture_lines: list[str]) -> str:
-    lines = [f"✅ Full-time: {match.home.name} {match.score_label} {match.away.name}"]
+    lines = [f"✅ Full-time: {match.home.label} {match.score_label} {match.away.label}"]
     lines.extend(next_fixture_lines)
     return "\n".join(lines)
 

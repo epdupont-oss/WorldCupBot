@@ -4,14 +4,42 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-FLAG_BY_NAME = {
-    "Switzerland": "🇨🇭",
-    "USA": "🇺🇸",
-    "United States": "🇺🇸",
-    "Germany": "🇩🇪",
-    "Japan": "🇯🇵",
-    "France": "🇫🇷",
-    "Argentina": "🇦🇷",
+# ISO 3166-1 alpha-2 codes for national teams, keyed by the name(s) football-data.org
+# uses. Covers all 48 World Cup 2026 slots' likely confederations; unmapped names
+# (typos, qualifiers not yet seen) fall back to a generic flag rather than nothing.
+_ISO2_BY_NAME = {
+    "Switzerland": "CH", "USA": "US", "United States": "US", "Germany": "DE",
+    "Japan": "JP", "France": "FR", "Argentina": "AR", "Brazil": "BR",
+    "Spain": "ES", "Portugal": "PT", "Italy": "IT",
+    "Netherlands": "NL", "Belgium": "BE", "Croatia": "HR", "Uruguay": "UY",
+    "Mexico": "MX", "Canada": "CA", "Colombia": "CO", "Ecuador": "EC",
+    "Morocco": "MA", "Senegal": "SN", "Ghana": "GH", "Nigeria": "NG",
+    "Tunisia": "TN", "Algeria": "DZ", "Egypt": "EG", "Cameroon": "CM",
+    "Ivory Coast": "CI", "Côte d'Ivoire": "CI", "South Africa": "ZA",
+    "South Korea": "KR", "Korea Republic": "KR", "Australia": "AU",
+    "Saudi Arabia": "SA", "Iran": "IR", "Qatar": "QA", "Jordan": "JO",
+    "Uzbekistan": "UZ", "Sweden": "SE", "Norway": "NO", "Denmark": "DK",
+    "Poland": "PL", "Austria": "AT", "Serbia": "RS",
+    "Ukraine": "UA", "Turkey": "TR", "Türkiye": "TR",
+    "Greece": "GR", "Czech Republic": "CZ", "Slovakia": "SK", "Hungary": "HU",
+    "Romania": "RO", "Finland": "FI", "Iceland": "IS", "Ireland": "IE",
+    "Republic of Ireland": "IE", "Slovenia": "SI", "Albania": "AL",
+    "Costa Rica": "CR", "Panama": "PA", "Honduras": "HN", "Jamaica": "JM",
+    "Paraguay": "PY", "Chile": "CL", "Peru": "PE", "Bolivia": "BO",
+    "Venezuela": "VE", "New Zealand": "NZ", "China": "CN", "China PR": "CN",
+    "India": "IN", "Iraq": "IQ", "United Arab Emirates": "AE", "Bahrain": "BH",
+    "Oman": "OM", "Kuwait": "KW", "Cape Verde": "CV", "DR Congo": "CD",
+    "Mali": "ML", "Burkina Faso": "BF", "Guinea": "GN", "Gabon": "GA",
+    "Curaçao": "CW", "Trinidad and Tobago": "TT", "Suriname": "SR",
+    "Haiti": "HT", "Guatemala": "GT",
+}
+
+# Home nations don't have ISO 3166-1 alpha-2 codes; their flags are fixed Unicode
+# subdivision-flag sequences rather than derivable from two letters.
+_FLAG_OVERRIDE_BY_NAME = {
+    "England": "🏴",
+    "Scotland": "🏴",
+    "Wales": "🏴",
 }
 
 # football-data.org v4 match status codes
@@ -19,8 +47,17 @@ _LIVE_STATUSES = {"IN_PLAY", "PAUSED"}
 _FINISHED_STATUSES = {"FINISHED", "AWARDED"}
 
 
+def _flag_emoji_from_iso2(code: str) -> str:
+    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in code.upper())
+
+
 def flag_for(name: str) -> str:
-    return FLAG_BY_NAME.get(name, "")
+    if name in _FLAG_OVERRIDE_BY_NAME:
+        return _FLAG_OVERRIDE_BY_NAME[name]
+    code = _ISO2_BY_NAME.get(name)
+    if code is None:
+        return "🏳️"
+    return _flag_emoji_from_iso2(code)
 
 
 @dataclass
