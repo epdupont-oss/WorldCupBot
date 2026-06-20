@@ -1,60 +1,93 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
-FLAG_BY_CODE = {
-    "SUI": "🇨🇭",
+FLAG_BY_NAME = {
+    "Switzerland": "🇨🇭",
     "USA": "🇺🇸",
-    "GER": "🇩🇪",
-    "JPN": "🇯🇵",
-    "FRA": "🇫🇷",
-    "ARG": "🇦🇷",
+    "Germany": "🇩🇪",
+    "Japan": "🇯🇵",
+    "France": "🇫🇷",
+    "Argentina": "🇦🇷",
 }
 
+# api-football fixture.status.short codes
+_LIVE_STATUSES = {"1H", "HT", "2H", "ET", "BT", "P", "INT"}
+_FINISHED_STATUSES = {"FT", "AET", "PEN", "CANC", "ABD", "AWD", "WO"}
 
-def flag_for(code: str, fallback_name: str = "") -> str:
-    return FLAG_BY_CODE.get(code, "")
+
+def flag_for(name: str) -> str:
+    return FLAG_BY_NAME.get(name, "")
 
 
 @dataclass
 class Team:
-    code: str
+    id: int
     name: str
 
     @property
     def label(self) -> str:
-        flag = flag_for(self.code)
+        flag = flag_for(self.name)
         return f"{flag} {self.name}".strip()
 
     @classmethod
     def from_api(cls, data: dict) -> "Team":
-        return cls(
-            code=data.get("code") or data.get("id") or "",
-            name=data.get("name") or data.get("code") or "Unknown",
-        )
+        return cls(id=data.get("id"), name=data.get("name") or "Unknown")
 
 
 @dataclass
 class MatchEvent:
     id: str
-    type: str  # goal | red_card | half_time | second_half_start | extra_time | penalties | full_time
+    type: str  # goal | red_card | half_time | second_half_start | extra_time_start | penalties_start
     minute: str
-    team_code: Optional[str] = None
+    team_id: Optional[int] = None
     player: Optional[str] = None
     assist: Optional[str] = None
 
     @classmethod
-    def from_api(cls, data: dict) -> "MatchEvent":
+    def from_api_goal_or_card(cls, data: dict) -> Optional["MatchEvent"]:
+        api_type = data.get("type")
+        detail = data.get("detail") or ""
+        if api_type == "Goal":
+            event_type = "goal"
+        elif api_type == "Card" and detail in ("Red Card", "Second Yellow card"):
+            event_type = "red_card"
+        else:
+            return None
+
+        time = data.get("time") or {}
+        elapsed = time.get("elapsed")
+        extra = time.get("extra")
+        minute = f"{elapsed}+{extra}" if extra else str(elapsed)
+
+        team = data.get("team") or {}
+        player = data.get("player") or {}
+        assist = data.get("assist") or {}
+
+        event_id = f"{event_type}:{minute}:{team.get('id')}:{player.get('name')}:{detail}"
         return cls(
-            id=str(data.get("id") or data.get("event_id")),
-            type=data.get("type") or data.get("event_type") or "",
-            minute=str(data.get("minute") or data.get("clock") or ""),
-            team_code=data.get("team_code") or data.get("team"),
-            player=data.get("player") or data.get("player_name"),
-            assist=data.get("assist") or data.get("assist_name"),
+            id=event_id,
+            type=event_type,
+            minute=minute,
+            team_id=team.get("id"),
+            player=player.get("name"),
+            assist=assist.get("name"),
         )
+
+    @classmethod
+    def phase_transition(cls, status_short: str) -> Optional["MatchEvent"]:
+        mapping = {
+            "HT": "half_time",
+            "2H": "second_half_start",
+            "ET": "extra_time_start",
+            "P": "penalties_start",
+        }
+        event_type = mapping.get(status_short)
+        if event_type is None:
+            return None
+        return cls(id=f"status:{status_short}", type=event_type, minute="")
 
     @property
     def minute_sort_key(self) -> tuple[int, int]:
@@ -71,28 +104,22 @@ class MatchEvent:
 
     @property
     def is_goal(self) -> bool:
-        return self.type in ("goal", "own_goal", "penalty_goal")
+        return self.type == "goal"
 
     @property
     def is_red_card(self) -> bool:
-        return self.type in ("red_card", "second_yellow_card")
+        return self.type == "red_card"
 
     @property
     def is_phase_transition(self) -> bool:
-        return self.type in (
-            "half_time",
-            "second_half_start",
-            "extra_time_start",
-            "penalties_start",
-            "full_time",
-        )
+        return self.type in ("half_time", "second_half_start", "extra_time_start", "penalties_start")
 
 
 @dataclass
 class Match:
-    id: str
-    status: str  # scheduled | live | finished
-    kickoff_utc: datetime
+    id: int
+    status_short: str
+    kickoff_utc: Optional[datetime]
     venue: str
     round_name: str
     home: Team
@@ -103,40 +130,56 @@ class Match:
     events: list[MatchEvent] = field(default_factory=list)
 
     @classmethod
-    def from_api(cls, data: dict) -> "Match":
-        kickoff_raw = data.get("kickoff") or data.get("kickoff_utc") or data.get("date")
-        kickoff_utc = _parse_utc(kickoff_raw)
+    def from_api(cls, fixture: dict, events: Optional[list[dict]] = None) -> "Match":
+        f = fixture.get("fixture", {})
+        league = fixture.get("league", {})
+        teams = fixture.get("teams", {})
+        goals = fixture.get("goals", {})
+        status = f.get("status", {})
+
+        kickoff_raw = f.get("date")
+        kickoff_utc = datetime.fromisoformat(kickoff_raw) if kickoff_raw else None
+
+        elapsed = status.get("elapsed")
+        minute = str(elapsed) if elapsed is not None else None
+
+        parsed_events = [
+            e
+            for raw in (events or [])
+            if (e := MatchEvent.from_api_goal_or_card(raw)) is not None
+        ]
+
         return cls(
-            id=str(data.get("id") or data.get("match_id")),
-            status=_normalize_status(data.get("status")),
+            id=f.get("id"),
+            status_short=status.get("short") or "NS",
             kickoff_utc=kickoff_utc,
-            venue=data.get("venue") or data.get("stadium") or "",
-            round_name=data.get("round") or data.get("group") or "",
-            home=Team.from_api(data.get("home_team") or data.get("home") or {}),
-            away=Team.from_api(data.get("away_team") or data.get("away") or {}),
-            home_score=_safe_int((data.get("score") or {}).get("home") if data.get("score") else data.get("home_score")),
-            away_score=_safe_int((data.get("score") or {}).get("away") if data.get("score") else data.get("away_score")),
-            minute=str(data.get("minute")) if data.get("minute") is not None else None,
-            events=[MatchEvent.from_api(e) for e in data.get("events", []) or []],
+            venue=(f.get("venue") or {}).get("name") or "",
+            round_name=league.get("round") or "",
+            home=Team.from_api(teams.get("home") or {}),
+            away=Team.from_api(teams.get("away") or {}),
+            home_score=goals.get("home"),
+            away_score=goals.get("away"),
+            minute=minute,
+            events=parsed_events,
         )
 
     @property
     def involves_watched_team(self) -> bool:
-        from worldcupbot.config import WATCHED_TEAM_CODES
+        from worldcupbot.config import WATCHED_TEAM_NAMES
 
-        return self.home.code in WATCHED_TEAM_CODES or self.away.code in WATCHED_TEAM_CODES
+        return self.home.name in WATCHED_TEAM_NAMES or self.away.name in WATCHED_TEAM_NAMES
 
     @property
     def is_live(self) -> bool:
-        return self.status == "live"
+        return self.status_short in _LIVE_STATUSES
 
     @property
     def is_finished(self) -> bool:
-        return self.status == "finished"
+        return self.status_short in _FINISHED_STATUSES
 
     @property
     def is_scheduled(self) -> bool:
-        return self.status == "scheduled"
+        return not self.is_live and not self.is_finished
 
     @property
     def score_label(self) -> str:
@@ -144,9 +187,9 @@ class Match:
             return ""
         return f"{self.home_score}–{self.away_score}"
 
-    def scorers_label(self, team_code: Optional[str] = None) -> str:
+    def scorers_label(self, team_id: Optional[int] = None) -> str:
         goals = sorted(
-            (e for e in self.events if e.is_goal and (team_code is None or e.team_code == team_code)),
+            (e for e in self.events if e.is_goal and (team_id is None or e.team_id == team_id)),
             key=lambda e: e.minute_sort_key,
         )
         parts = []
@@ -154,37 +197,3 @@ class Match:
             label = f"{g.player} {g.minute}'" if g.player else f"{g.minute}'"
             parts.append(label)
         return ", ".join(parts)
-
-
-def _parse_utc(raw) -> Optional[datetime]:
-    if not raw:
-        return None
-    if isinstance(raw, datetime):
-        return raw.astimezone(timezone.utc)
-    text = str(raw)
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    dt = datetime.fromisoformat(text)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _normalize_status(raw: Optional[str]) -> str:
-    if not raw:
-        return "scheduled"
-    raw = raw.lower()
-    if raw in ("live", "in_play", "in_progress", "1h", "2h", "ht", "et", "pen"):
-        return "live"
-    if raw in ("finished", "ft", "full_time", "ended"):
-        return "finished"
-    return "scheduled"
-
-
-def _safe_int(value) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None

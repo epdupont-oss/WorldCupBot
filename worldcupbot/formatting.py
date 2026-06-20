@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from worldcupbot.config import WATCHED_TEAM_CODES
 from worldcupbot.models import Match, MatchEvent
 
 
@@ -19,11 +18,11 @@ def local_date_label(match: Match, tz: ZoneInfo) -> str:
     return match.kickoff_utc.astimezone(tz).strftime("%b %d")
 
 
-def next_fixture_label(team_code: str, fixture: Optional[Match], tz: ZoneInfo) -> str:
+def next_fixture_label(team_name: str, fixture: Optional[Match], tz: ZoneInfo) -> str:
     if fixture is None:
-        return f"📅 Next {team_code}: TBD"
-    opponent = fixture.away if fixture.home.code == team_code else fixture.home
-    team = fixture.home if fixture.home.code == team_code else fixture.away
+        return f"📅 Next {team_name}: TBD"
+    opponent = fixture.away if fixture.home.name == team_name else fixture.home
+    team = fixture.home if fixture.home.name == team_name else fixture.away
     return f"📅 Next: {team.name} vs {opponent.name} · {local_date_label(fixture, tz)} · {local_time(fixture, tz)}"
 
 
@@ -62,8 +61,8 @@ def format_phase_transition(match: Match, event: MatchEvent) -> str:
 
 
 def format_full_time(match: Match, next_fixture_lines: list[str]) -> str:
-    home_scorers = match.scorers_label(match.home.code)
-    away_scorers = match.scorers_label(match.away.code)
+    home_scorers = match.scorers_label(match.home.id)
+    away_scorers = match.scorers_label(match.away.id)
     lines = [f"✅ Full-time: {match.home.name} {match.score_label} {match.away.name}"]
     if home_scorers:
         lines.append(f"⚽ {home_scorers}")
@@ -109,7 +108,7 @@ def format_update_message(matches: list[Match], tz: ZoneInfo) -> str:
 def format_morning_digest(
     matches: list[Match],
     next_fixture: Optional[Match],
-    watched_team_code: Optional[str],
+    watched_team_name: Optional[str],
     tz: ZoneInfo,
 ) -> str:
     lines = ["☕ Good morning! Today's matches:"]
@@ -119,15 +118,15 @@ def format_morning_digest(
         lines.append(f"{m.home.label} vs {m.away.label} · {local_time(m, tz)}{venue_part}")
     if not has_watched:
         lines.append("(No Switzerland or USA today)")
-    if watched_team_code:
-        lines.append(next_fixture_label(watched_team_code, next_fixture, tz))
+    if watched_team_name:
+        lines.append(next_fixture_label(watched_team_name, next_fixture, tz))
     return "\n".join(lines)
 
 
 def format_evening_recap(
     matches: list[Match],
     next_fixture: Optional[Match],
-    watched_team_code: Optional[str],
+    watched_team_name: Optional[str],
     tz: ZoneInfo,
 ) -> str:
     lines = ["🌙 Today's results:"]
@@ -137,6 +136,6 @@ def format_evening_recap(
         if scorers:
             line += f" · {scorers}"
         lines.append(line)
-    if watched_team_code:
-        lines.append(next_fixture_label(watched_team_code, next_fixture, tz))
+    if watched_team_name:
+        lines.append(next_fixture_label(watched_team_name, next_fixture, tz))
     return "\n".join(lines)

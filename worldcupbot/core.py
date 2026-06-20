@@ -16,7 +16,7 @@ from worldcupbot.config import (
     MORNING_DIGEST_HOUR,
     PRE_MATCH_ALERT_MINUTES_BEFORE,
     TELEGRAM_CHAT_ID,
-    WATCHED_TEAM_CODES,
+    WATCHED_TEAM_NAMES,
 )
 from worldcupbot.formatting import (
     format_evening_recap,
@@ -28,7 +28,7 @@ from worldcupbot.formatting import (
     format_red_card,
     next_fixture_label,
 )
-from worldcupbot.models import Match
+from worldcupbot.models import Match, MatchEvent
 from worldcupbot.state import STATE
 
 logger = logging.getLogger(__name__)
@@ -42,11 +42,11 @@ JOB_DAILY_REFRESH = "daily_refresh"
 DAY_JOB_IDS = (JOB_MORNING_DIGEST, JOB_EVENING_RECAP, JOB_PRE_MATCH_ALERT, JOB_LIVE_POLL)
 
 
-def _first_watched_team_code(match: Match) -> str | None:
-    if match.home.code in WATCHED_TEAM_CODES:
-        return match.home.code
-    if match.away.code in WATCHED_TEAM_CODES:
-        return match.away.code
+def _first_watched_team_name(match: Match) -> str | None:
+    if match.home.name in WATCHED_TEAM_NAMES:
+        return match.home.name
+    if match.away.name in WATCHED_TEAM_NAMES:
+        return match.away.name
     return None
 
 
@@ -94,11 +94,13 @@ class WorldCupBot:
 
         if live_watched is not None:
             STATE.live_match_id = live_watched.id
+            STATE.live_match_status = live_watched.status_short
             STATE.seen_event_ids = {e.id for e in live_watched.events}
             self._start_live_poll()
             return
 
         STATE.live_match_id = None
+        STATE.live_match_status = None
 
         upcoming_watched = next(
             (m for m in sorted(watched_matches, key=lambda m: m.kickoff_utc) if m.is_scheduled),
@@ -166,17 +168,17 @@ class WorldCupBot:
         except Exception:
             logger.exception("Failed to fetch matches for morning digest")
             return
-        watched_code = next(
-            (code for m in matches for code in (m.home.code, m.away.code) if code in WATCHED_TEAM_CODES),
+        watched_name = next(
+            (name for m in matches for name in (m.home.name, m.away.name) if name in WATCHED_TEAM_NAMES),
             None,
         )
         next_fixture = None
-        team_code = watched_code or next(iter(WATCHED_TEAM_CODES))
+        team_name = watched_name or next(iter(WATCHED_TEAM_NAMES))
         try:
-            next_fixture = await self.api.get_next_fixture(team_code)
+            next_fixture = await self.api.get_next_fixture(team_name)
         except Exception:
             logger.exception("Failed to fetch next fixture for morning digest")
-        await self.send(format_morning_digest(matches, next_fixture, team_code, tz))
+        await self.send(format_morning_digest(matches, next_fixture, team_name, tz))
         STATE.morning_digest_sent_for = today_local
 
     async def _job_evening_recap(self) -> None:
@@ -187,16 +189,16 @@ class WorldCupBot:
         except Exception:
             logger.exception("Failed to fetch matches for evening recap")
             return
-        team_code = next(iter(WATCHED_TEAM_CODES))
+        team_name = next(iter(WATCHED_TEAM_NAMES))
         next_fixture = None
         try:
-            next_fixture = await self.api.get_next_fixture(team_code)
+            next_fixture = await self.api.get_next_fixture(team_name)
         except Exception:
             logger.exception("Failed to fetch next fixture for evening recap")
-        await self.send(format_evening_recap(matches, next_fixture, team_code, tz))
+        await self.send(format_evening_recap(matches, next_fixture, team_name, tz))
         STATE.evening_recap_sent_for = today_local
 
-    async def _job_pre_match_alert(self, match_id: str) -> None:
+    async def _job_pre_match_alert(self, match_id: int) -> None:
         tz = STATE.tz
         try:
             match = await self.api.get_match(match_id)
@@ -222,8 +224,12 @@ class WorldCupBot:
                 await self.send(format_goal(match, event))
             elif event.is_red_card:
                 await self.send(format_red_card(match, event))
-            elif event.is_phase_transition and event.type != "full_time":
-                await self.send(format_phase_transition(match, event))
+
+        if match.status_short != STATE.live_match_status:
+            transition = MatchEvent.phase_transition(match.status_short)
+            if transition is not None:
+                await self.send(format_phase_transition(match, transition))
+            STATE.live_match_status = match.status_short
 
         if match.is_finished:
             await self._finish_live_match(match)
@@ -233,14 +239,15 @@ class WorldCupBot:
         if job is not None:
             job.remove()
         STATE.live_match_id = None
+        STATE.live_match_status = None
 
-        team_code = _first_watched_team_code(match) or next(iter(WATCHED_TEAM_CODES))
+        team_name = _first_watched_team_name(match) or next(iter(WATCHED_TEAM_NAMES))
         next_fixture = None
         try:
-            next_fixture = await self.api.get_next_fixture(team_code)
+            next_fixture = await self.api.get_next_fixture(team_name)
         except Exception:
             logger.exception("Failed to fetch next fixture for full-time recap")
-        next_line = next_fixture_label(team_code, next_fixture, STATE.tz)
+        next_line = next_fixture_label(team_name, next_fixture, STATE.tz)
         await self.send(format_full_time(match, [next_line]))
 
         await self.refresh_schedule()
