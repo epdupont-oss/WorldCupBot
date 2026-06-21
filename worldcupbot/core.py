@@ -27,7 +27,7 @@ from worldcupbot.formatting import (
     format_pre_match,
     next_fixture_label,
 )
-from worldcupbot.mistral import MistralEnricher
+from worldcupbot.groq import GroqEnricher
 from worldcupbot.models import Match, Team
 from worldcupbot.state import STATE
 
@@ -56,12 +56,12 @@ class WorldCupBot:
         bot: Bot,
         api: WorldCupAPIClient,
         scheduler: AsyncIOScheduler,
-        mistral: MistralEnricher | None = None,
+        groq: GroqEnricher | None = None,
     ) -> None:
         self.bot = bot
         self.api = api
         self.scheduler = scheduler
-        self.mistral = mistral or MistralEnricher()
+        self.groq = groq or GroqEnricher()
 
     async def send(self, text: str) -> None:
         await self.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
@@ -255,7 +255,7 @@ class WorldCupBot:
     async def _send_goal_alert(self, match: Match, scoring_team: Team) -> None:
         scorer_info = None
         try:
-            scorer_info = await self.mistral.lookup_goal_scorer(scoring_team.name, match.score_label)
+            scorer_info = await self.groq.lookup_goal_scorer(scoring_team.name, match.score_label)
         except Exception:
             logger.exception("Scorer enrichment lookup raised unexpectedly")
         await self.send(format_goal(match, scoring_team, scorer_info))

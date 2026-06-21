@@ -18,9 +18,10 @@ WC_COMPETITION_CODE = _env("WC_COMPETITION_CODE", "WC")
 WC_SEASON = int(_env("WC_SEASON", "2026"))
 
 # Optional: enriches goal alerts with a web-search-grounded scorer lookup via
-# Mistral's Agents API. Leave MISTRAL_API_KEY unset to disable (alerts stay generic).
-MISTRAL_API_KEY = _env("MISTRAL_API_KEY", "")
-MISTRAL_MODEL = _env("MISTRAL_MODEL", "mistral-small-latest")
+# Groq's compound model (built-in web search tool). Leave GROQ_API_KEY unset
+# to disable (alerts stay generic).
+GROQ_API_KEY = _env("GROQ_API_KEY", "")
+GROQ_MODEL = _env("GROQ_MODEL", "groq/compound")
 
 WATCHED_TEAM_NAMES = {
     name.strip()

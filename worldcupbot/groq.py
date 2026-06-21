@@ -4,27 +4,27 @@ import logging
 
 import httpx
 
-from worldcupbot.config import MISTRAL_API_KEY, MISTRAL_MODEL
+from worldcupbot.config import GROQ_API_KEY, GROQ_MODEL
 
 logger = logging.getLogger(__name__)
 
-_MISTRAL_BASE_URL = "https://api.mistral.ai/v1"
+_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
-class MistralEnricher:
+class GroqEnricher:
     """Optional web-search-grounded lookup to enrich generic goal alerts with a
     scorer name, since football-data.org's free tier doesn't expose that.
 
-    Disabled (returns None for every lookup) unless MISTRAL_API_KEY is set.
+    Disabled (returns None for every lookup) unless GROQ_API_KEY is set.
     Failures (timeouts, errors, no answer found) are swallowed and logged —
     enrichment is a nice-to-have, never a reason to block or delay an alert.
     """
 
     def __init__(self) -> None:
-        self.enabled = bool(MISTRAL_API_KEY)
+        self.enabled = bool(GROQ_API_KEY)
         self._client = httpx.AsyncClient(
-            base_url=_MISTRAL_BASE_URL,
-            headers={"Authorization": f"Bearer {MISTRAL_API_KEY}"},
+            base_url=_GROQ_BASE_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             timeout=20.0,
         )
 
@@ -43,18 +43,22 @@ class MistralEnricher:
         )
         try:
             resp = await self._client.post(
-                "/conversations",
+                "/chat/completions",
                 json={
-                    "model": MISTRAL_MODEL,
-                    "instructions": "You are a terse sports-news assistant. Answer in one short line.",
-                    "tools": [{"type": "web_search"}],
-                    "inputs": question,
+                    "model": GROQ_MODEL,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a terse sports-news assistant. Answer in one short line.",
+                        },
+                        {"role": "user", "content": question},
+                    ],
                 },
             )
             resp.raise_for_status()
             payload = resp.json()
         except Exception:
-            logger.exception("Mistral scorer lookup failed")
+            logger.exception("Groq scorer lookup failed")
             return None
 
         answer = self._extract_text(payload)
@@ -64,15 +68,8 @@ class MistralEnricher:
 
     @staticmethod
     def _extract_text(payload: dict) -> str | None:
-        for entry in payload.get("outputs", []):
-            if entry.get("type") != "message.output":
-                continue
-            content = entry.get("content")
-            if isinstance(content, str):
-                return content.strip()
-            if isinstance(content, list):
-                texts = [c.get("text", "") for c in content if isinstance(c, dict)]
-                joined = " ".join(t for t in texts if t).strip()
-                if joined:
-                    return joined
-        return None
+        choices = payload.get("choices") or []
+        if not choices:
+            return None
+        content = (choices[0].get("message") or {}).get("content")
+        return content.strip() if content else None
